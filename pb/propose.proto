@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package pb;
+option go_package = "./;pb";
+
+
+
+message Propose {
+  ProposeType ProposeType=1;
+  string NodeId=2; //提议的nodeId
+  bytes  Data=3;//同步内容
+  int64  ProposeId =4;//提议的线程Id 可理解为解析数据
+  int64  TimesTamp=5;
+
+}
+
+enum ProposeType{
+   SyncMessage = 0; //发送消息
+   SyncData =1;//同步数据
+   SyncLock=2;//同步锁
+   SyncState=3;//同步状态
+}
+

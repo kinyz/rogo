@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package pb;
+option go_package = "./;pb";
+
+
+
+message KvData{
+  string Key =1;
+  bytes Value=2;
+}

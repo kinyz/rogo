@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package pb;
+option go_package = "./;pb";
+
+
+
+message Message{
+    uint64 ClusterId= 1;
+    uint64 NodeId= 2;
+    int64  ProposeId =3;//提议的线程Id 可理解为解析数据
+    bytes Data=4;
+
+}
