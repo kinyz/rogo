@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package pb;
+option go_package = "./;pb";
+
+
+service Request {
+  rpc RequestJoin(RequestJoinCluster)returns(ResponseJoinResult);
+}
+
+message RequestJoinCluster{
+  uint64 ClusterId =1;
+  uint64 NodeId =2;
+  string RaftAddresses=3;
+  string Key=4;
+}
+
+message ResponseJoinResult{
+  int64 Status=1;
+  string Msg=2;
+  //uint64 NodeId=3;
+
+}

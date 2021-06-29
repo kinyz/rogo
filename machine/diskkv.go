@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package storage
+package machine
 
 import (
 	"bytes"
@@ -43,7 +43,7 @@ import (
 
 const (
 	appliedIndexKey    string = "disk_kv_applied_index"
-	localDBDirName      string = "db-data"
+	localDBDirName     string = "db-data"
 	currentDBFilename  string = "current"
 	updatingDBFilename string = "current.updating"
 )
@@ -77,7 +77,6 @@ func syncDir(dir string) (err error) {
 	}()
 	return df.Sync()
 }
-
 
 // pebbledb is a wrapper to ensure lookup() and close() can be concurrently
 // invoked. IOnDiskStateMachine.Update() and close() will never be concurrently
@@ -280,19 +279,19 @@ type DiskKV struct {
 	db          unsafe.Pointer
 	closed      bool
 	aborted     bool
-	messageHandle prehandle.Message
+	handle      prehandle.Handle
 }
 
 // NewDiskKV creates a new disk kv test state machine.
-func NewDiskKV(message prehandle.Message) *DiskKV {
+func NewDiskKV(handle prehandle.Handle) *DiskKV {
 	d := &DiskKV{
-		messageHandle: message,
+		handle: handle,
 	}
 	return d
 }
 
-func (d *DiskKV)PreHandle(clusterID uint64,
-	nodeID uint64)sm.IOnDiskStateMachine{
+func (d *DiskKV) PreHandle(clusterID uint64,
+	nodeID uint64) sm.IOnDiskStateMachine {
 	d.clusterID = clusterID
 	d.nodeID = nodeID
 	return d
@@ -392,17 +391,17 @@ func (d *DiskKV) Update(ents []sm.Entry) ([]sm.Entry, error) {
 
 	propose := objPool.ProposePool.Get().(*pb.Propose)
 
-	w:=false
+	w := false
 	for idx, e := range ents {
 		err := proto.UnmarshalMerge(e.Cmd, propose)
 		if err != nil {
-			log.Println("解析错误:",err)
+			log.Println("解析错误:", err)
 			continue
 		}
 
 		switch propose.GetProposeType() {
 		case pb.ProposeType_SyncMessage:
-			d.messageHandle.SyncMessage(&pb.Message{
+			d.handle.SyncMessage(&pb.Message{
 				ClusterId: d.clusterID,
 				NodeId:    d.nodeID,
 				ProposeId: propose.GetProposeId(),
@@ -410,11 +409,11 @@ func (d *DiskKV) Update(ents []sm.Entry) ([]sm.Entry, error) {
 			})
 			continue
 		case pb.ProposeType_SyncData:
-			w=true
-			dataKv:=&pb.KvData{}
+			w = true
+			dataKv := &pb.KvData{}
 			err := proto.Unmarshal(propose.GetData(), dataKv)
 			if err != nil {
-				log.Println("dataKv 解析错误:",err)
+				log.Println("dataKv 解析错误:", err)
 				continue
 			}
 			wb.Set([]byte(dataKv.GetKey()), dataKv.GetValue(), db.wo)
@@ -423,7 +422,7 @@ func (d *DiskKV) Update(ents []sm.Entry) ([]sm.Entry, error) {
 		}
 
 	}
-	if w{
+	if w {
 		// save the applied index to the DB.
 		appliedIndex := make([]byte, 8)
 		binary.LittleEndian.PutUint64(appliedIndex, ents[len(ents)-1].Index)
@@ -483,8 +482,8 @@ func (d *DiskKV) saveToWriter(db *pebbledb,
 	values := make([]*pb.KvData, 0)
 
 	for iter.First(); iteratorIsValid(iter); iter.Next() {
-		kv:=objPool.KvPool.Get().(*pb.KvData)
-		kv.Key =string(iter.Key())
+		kv := objPool.KvPool.Get().(*pb.KvData)
+		kv.Key = string(iter.Key())
 		kv.Value = iter.Value()
 		values = append(values, kv)
 	}
@@ -566,7 +565,7 @@ func (d *DiskKV) RecoverFromSnapshot(r io.Reader,
 			return err
 		}
 
-		dataKv:=objPool.KvPool.Get().(*pb.KvData)
+		dataKv := objPool.KvPool.Get().(*pb.KvData)
 		err := proto.Unmarshal(data, dataKv)
 		if err != nil {
 			panic(err)

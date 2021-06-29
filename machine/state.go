@@ -1,61 +1,59 @@
 package machine
 
 import (
+	"errors"
 	sm "github.com/lni/dragonboat/v3/statemachine"
 	"io"
+	"log"
 	"rogo/objPool"
 	"rogo/pb"
 	"rogo/prehandle"
 )
 
-
 type StateMachine struct {
 	ClusterID uint64
 	NodeID    uint64
 	//Count     uint64
-	messageHandle prehandle.Message
+	handle prehandle.Handle
 }
 
 // NewStateMachine creates and return a new ExampleStateMachine object.
-func NewStateMachine(message prehandle.Message) *StateMachine {
+func NewStateMachine(handle prehandle.Handle) *StateMachine {
 	return &StateMachine{
-		messageHandle: message,
+		handle: handle,
 	}
 }
 
-func (s *StateMachine)PreHandle(clusterID uint64,
-	nodeID uint64)sm.IStateMachine{
+func (s *StateMachine) PreHandle(clusterID uint64,
+	nodeID uint64) sm.IStateMachine {
 	s.ClusterID = clusterID
 	s.NodeID = nodeID
 	return s
 }
 
-
 // Lookup performs local lookup on the ExampleStateMachine instance. In this example,
 // we always return the Count value as a little endian binary encoded byte
 // slice.
 func (s *StateMachine) Lookup(query interface{}) (interface{}, error) {
-	result := make([]byte, 8)
+	//result := make([]byte, 8)
 	//binary.LittleEndian.PutUint64(result, s.Count)
 
-	return result, nil
+	log.Println("我还是被执行了")
+
+	return nil, errors.New("111")
 }
 
 // Update updates the object using the specified committed raft entry.
 func (s *StateMachine) Update(data []byte) (sm.Result, error) {
-	p:=objPool.ProposePool.Get().(*pb.Propose)
+	p := objPool.ProposePool.Get().(*pb.Propose)
 	switch p.GetProposeType() {
 	case pb.ProposeType_SyncMessage:
-		s.messageHandle.SyncMessage(&pb.Message{
+		s.handle.SyncMessage(&pb.Message{
 			ClusterId: s.ClusterID,
 			NodeId:    s.NodeID,
 			ProposeId: p.GetProposeId(),
 			Data:      p.GetData(),
 		})
-		break
-	case pb.ProposeType_SyncState:
-		break
-	case pb.ProposeType_SyncLock:
 		break
 	}
 
