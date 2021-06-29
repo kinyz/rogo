@@ -13,9 +13,9 @@ import (
 func main() {
 	n := rogo.NewNode("127.0.0.1", "13202", 1)
 	ma := &mainCluster{nodeId: 2, key: "123", node: n}
-	err := n.CreatMemoryCluster(102, ma)
-	if err != nil {
 
+	err := n.CreatStorageCluster(102, rogo.StorageTypeDisk, false)
+	if err != nil {
 		panic(err)
 	}
 

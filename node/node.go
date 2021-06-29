@@ -21,30 +21,34 @@ import (
 )
 
 type Node interface {
-	CreatStateCluster(clusterId uint64, handle prehandle.Handle) error
-	JoinStateCluster(clusterId uint64, handle prehandle.Handle) error
 
-	CreatMemoryCluster(clusterId uint64, handle prehandle.Handle) error
-	JoinMemoryCluster(clusterId uint64, handle prehandle.Handle) error
+	// CreatStorageCluster 创建存储集群
+	CreatStorageCluster(clusterId uint64, machineType pb.StorageType, join bool) error
 
-	CreatDiskCluster(clusterId uint64, handle prehandle.Handle) error
-	JoinDiskCluster(clusterId uint64, handle prehandle.Handle) error
+	// CreatMessageCluster 创建消息集群
+	CreatMessageCluster(clusterId uint64, join bool, handle prehandle.Handle) error
 
-	SendMsg(clusterId uint64, msgId int64, data []byte) error
-	SyncData(clusterId uint64, key string, value []byte) error
-	GetSyncData(clusterId uint64, key string) ([]byte, error)
-	RemoveSyncData(clusterId uint64, key string) error
+	// SendMessage 发送消息 仅消息集群可用
+	SendMessage(clusterId uint64, msgId int64, data []byte) error
+
+	SetData(clusterId uint64, key string, value []byte) error
+	GetData(clusterId uint64, key string) ([]byte, error)
+	RemoveData(clusterId uint64, key string) error
 
 	StopCluster(clusterId uint64) error
 
 	AddNode(clusterId uint64, nodeId uint64, addr string) error
+	AddWitnessNode(clusterId uint64, nodeId uint64, addr string) error
+	AddObserverNode(clusterId uint64, nodeId uint64, addr string) error
 
-	GetSession(clusterId uint64) *client.Session
+	// BanNode 删除Node 此Node进入黑名单
+	BanNode(clusterId uint64, node uint64) error
 
-	RequestJoinCluster(grpcAddr string, clusterId uint64, key string) (*pb.ResponseJoinResult, error)
+	RequestJoinCluster(grpcAddr string, clusterId uint64, key string, role pb.JoinRole) (*pb.ResponseJoinResult, error)
+
 	StartOauthService(addr string, srv prehandle.RequestHandle) error
 
-	GetNodeHost() *dragonboat.NodeHost
+	GetRaftId() string
 }
 
 func NewNode(addr, port string, nodeId uint64) Node {
@@ -79,23 +83,64 @@ type node struct {
 	reqDandle prehandle.RequestHandle
 }
 
+func (n *node) CreatStorageCluster(clusterId uint64, machineType pb.StorageType, join bool) error {
+	initialMembers := make(map[uint64]string)
+	if !join {
+		initialMembers[1] = n.nh.RaftAddress()
+	}
+	rc := config.Config{
+		NodeID:             n.nodeId,
+		ClusterID:          clusterId,
+		ElectionRTT:        10,
+		HeartbeatRTT:       1,
+		CheckQuorum:        true,
+		SnapshotEntries:    10,
+		CompactionOverhead: 5,
+	}
+	switch machineType {
+	case pb.StorageType_Disk:
+		return n.nh.StartOnDiskCluster(initialMembers, join, machine.NewDiskKV, rc)
+	case pb.StorageType_Memory:
+		return n.nh.StartCluster(initialMembers, join, machine.NewMemoryMachine, rc)
+	}
+	return errors.New("storage type type is error")
+
+}
+
+func (n *node) CreatMessageCluster(clusterId uint64, join bool, handle prehandle.Handle) error {
+	initialMembers := make(map[uint64]string)
+	if !join {
+		initialMembers[1] = n.nh.RaftAddress()
+	}
+	rc := config.Config{
+		NodeID:             n.nodeId,
+		ClusterID:          clusterId,
+		ElectionRTT:        10,
+		HeartbeatRTT:       1,
+		CheckQuorum:        true,
+		SnapshotEntries:    10,
+		CompactionOverhead: 5,
+	}
+	m := machine.NewMessageMachine(handle)
+	return n.nh.StartCluster(initialMembers, join, m.PreHandle, rc)
+
+}
+
 //提议数据
 func (n *node) proposeData(clusterId uint64, proposeType pb.ProposeType, proposeId int64, data []byte) error {
 	p := objPool.ProposePool.Get().(*pb.Propose)
 	defer objPool.ProposePool.Put(p)
 	p.TimesTamp = time.Now().UnixNano()
 	p.Data = data
-	p.NodeId = n.nh.ID()
+	p.NodeId = n.GetRaftId()
 	p.ProposeType = proposeType
 	p.ProposeId = proposeId
-	cs := n.nh.GetNoOPSession(clusterId)
-
 	d, err := proto.Marshal(p)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	_, err = n.nh.SyncPropose(ctx, cs, d)
+	_, err = n.nh.SyncPropose(ctx, n.nh.GetNoOPSession(clusterId), d)
 	if err != nil {
 		cancel()
 		return err
@@ -108,12 +153,12 @@ func (n *node) GetNodeHost() *dragonboat.NodeHost {
 	return n.nh
 }
 
-// SendMsg 发送消息
-func (n *node) SendMsg(clusterId uint64, msgId int64, data []byte) error {
+// SendMessage 发送消息
+func (n *node) SendMessage(clusterId uint64, msgId int64, data []byte) error {
 	return n.proposeData(clusterId, pb.ProposeType_SyncMessage, msgId, data)
 }
 
-func (n *node) SyncData(clusterId uint64, key string, value []byte) error {
+func (n *node) SetData(clusterId uint64, key string, value []byte) error {
 	kvData := objPool.KvPool.Get().(*pb.KvData)
 	defer objPool.KvPool.Put(kvData)
 	kvData.Key = key
@@ -126,7 +171,7 @@ func (n *node) SyncData(clusterId uint64, key string, value []byte) error {
 	return n.proposeData(clusterId, pb.ProposeType_SyncData, 0, data)
 }
 
-func (n *node) GetSyncData(clusterId uint64, key string) ([]byte, error) {
+func (n *node) GetData(clusterId uint64, key string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	read, err := n.nh.SyncRead(ctx, clusterId, []byte(key))
 	if err != nil {
@@ -137,112 +182,20 @@ func (n *node) GetSyncData(clusterId uint64, key string) ([]byte, error) {
 	if string(read.([]byte)) == "" {
 		return nil, errors.New("key " + key + " is not exist")
 	}
-	//log.Println(read)
-	//kvData:=objPool.KvPool.Get().(*pb.KvData)
-	//err = proto.Unmarshal(read.([]byte), kvData)
-	//if err != nil {
-	//	return nil, err
-	//}
 
 	return read.([]byte), nil
 }
 
-func (n *node) RemoveSyncData(clusterId uint64, key string) error {
-	return n.SyncData(clusterId, key, []byte(""))
-}
-
-func (n *node) CreatStateCluster(clusterId uint64, handle prehandle.Handle) error {
-	initialMembers := make(map[uint64]string)
-	initialMembers[1] = n.nh.RaftAddress()
-	rc := config.Config{
-		NodeID:             n.nodeId,
-		ClusterID:          clusterId,
-		ElectionRTT:        10,
-		HeartbeatRTT:       1,
-		CheckQuorum:        true,
-		SnapshotEntries:    10,
-		CompactionOverhead: 5,
-	}
-
-	m := machine.NewStateMachine(handle)
-	return n.nh.StartCluster(initialMembers, false, m.PreHandle, rc)
-
-}
-func (n *node) JoinStateCluster(clusterId uint64, handle prehandle.Handle) error {
-
-	return n.nh.StartCluster(make(map[uint64]string), true, machine.NewStateMachine(handle).PreHandle, config.Config{
-		NodeID:             n.nodeId,
-		ClusterID:          clusterId,
-		ElectionRTT:        10,
-		HeartbeatRTT:       1,
-		CheckQuorum:        true,
-		SnapshotEntries:    10,
-		CompactionOverhead: 5,
-	})
-}
-
-func (n *node) CreatDiskCluster(clusterId uint64, handle prehandle.Handle) error {
-	initialMembers := make(map[uint64]string)
-	initialMembers[1] = n.nh.RaftAddress()
-	rc := config.Config{
-		NodeID:             n.nodeId,
-		ClusterID:          clusterId,
-		ElectionRTT:        10,
-		HeartbeatRTT:       1,
-		CheckQuorum:        true,
-		SnapshotEntries:    10,
-		CompactionOverhead: 5,
-	}
-	m := machine.NewDiskKV(handle)
-	if err := n.nh.StartOnDiskCluster(initialMembers, false, m.PreHandle, rc); err != nil {
+func (n *node) RemoveData(clusterId uint64, key string) error {
+	kvData := objPool.KvPool.Get().(*pb.KvData)
+	defer objPool.KvPool.Put(kvData)
+	kvData.Key = key
+	kvData.Value = []byte("")
+	data, err := proto.Marshal(kvData)
+	if err != nil {
 		return err
 	}
-	return nil
-}
-
-func (n *node) JoinDiskCluster(clusterId uint64, handle prehandle.Handle) error {
-
-	return n.nh.StartOnDiskCluster(make(map[uint64]string), true, machine.NewDiskKV(handle).PreHandle, config.Config{
-		NodeID:             n.nodeId,
-		ClusterID:          clusterId,
-		ElectionRTT:        10,
-		HeartbeatRTT:       1,
-		CheckQuorum:        true,
-		SnapshotEntries:    10,
-		CompactionOverhead: 5,
-	})
-}
-
-func (n *node) CreatMemoryCluster(clusterId uint64, handle prehandle.Handle) error {
-	initialMembers := make(map[uint64]string)
-	initialMembers[1] = n.nh.RaftAddress()
-	rc := config.Config{
-		NodeID:             n.nodeId,
-		ClusterID:          clusterId,
-		ElectionRTT:        10,
-		HeartbeatRTT:       1,
-		CheckQuorum:        true,
-		SnapshotEntries:    10,
-		CompactionOverhead: 5,
-	}
-	m := machine.NewMemoryMachine(handle)
-	if err := n.nh.StartCluster(initialMembers, false, m.PreStateHandle, rc); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (n *node) JoinMemoryCluster(clusterId uint64, handle prehandle.Handle) error {
-
-	return n.nh.StartCluster(make(map[uint64]string), true, machine.NewMemoryMachine(handle).PreStateHandle, config.Config{
-		NodeID:             n.nodeId,
-		ClusterID:          clusterId,
-		ElectionRTT:        10,
-		HeartbeatRTT:       1,
-		CheckQuorum:        true,
-		SnapshotEntries:    10,
-		CompactionOverhead: 5,
-	})
+	return n.proposeData(clusterId, pb.ProposeType_SyncRemoveData, 0, data)
 }
 
 func (n *node) StopCluster(clusterId uint64) error {
@@ -256,6 +209,27 @@ func (n *node) AddNode(clusterId uint64, nodeId uint64, addr string) error {
 	}
 
 	return nil
+}
+func (n *node) AddWitnessNode(clusterId uint64, nodeId uint64, addr string) error {
+	_, err := n.nh.RequestAddWitness(clusterId, nodeId, addr, 0, 5*time.Second)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (n *node) AddObserverNode(clusterId uint64, nodeId uint64, addr string) error {
+	_, err := n.nh.RequestAddObserver(clusterId, nodeId, addr, 0, 5*time.Second)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (n *node) GetRaftId() string {
+	return n.nh.ID()
 }
 
 func (n *node) GetSession(clusterId uint64) *client.Session {
@@ -284,7 +258,7 @@ func (n *node) StartOauthService(addr string, srv prehandle.RequestHandle) error
 	return nil
 }
 
-func (n *node) RequestJoinCluster(grpcAddr string, clusterId uint64, key string) (*pb.ResponseJoinResult, error) {
+func (n *node) RequestJoinCluster(grpcAddr string, clusterId uint64, key string, role pb.JoinRole) (*pb.ResponseJoinResult, error) {
 	conn, err := grpc.Dial(grpcAddr, grpc.WithInsecure())
 	if err != nil {
 		return nil, err
@@ -294,6 +268,7 @@ func (n *node) RequestJoinCluster(grpcAddr string, clusterId uint64, key string)
 		RaftAddresses: n.nh.RaftAddress(),
 		Key:           key,
 		NodeId:        n.nodeId,
+		JoinRole:      role,
 	})
 
 }
@@ -306,10 +281,30 @@ func (n *node) RequestJoin(ctx context.Context, req *pb.RequestJoinCluster) (*pb
 		return nil, err
 	}
 
-	err = n.AddNode(req.GetClusterId(), req.GetNodeId(), req.GetRaftAddresses())
-	if err != nil {
-		return nil, err
+	switch req.GetJoinRole() {
+	case pb.JoinRole_Follower:
+		err = n.AddNode(req.GetClusterId(), req.GetNodeId(), req.GetRaftAddresses())
+		if err != nil {
+			return nil, err
+		}
+		break
+	case pb.JoinRole_Witness:
+		//log.Println("见证者加入")
+		err = n.AddWitnessNode(req.GetClusterId(), req.GetNodeId(), req.GetRaftAddresses())
+		if err != nil {
+			return nil, err
+		}
+		break
+	case pb.JoinRole_Observer:
+		err = n.AddObserverNode(req.GetClusterId(), req.GetNodeId(), req.GetRaftAddresses())
+		if err != nil {
+			return nil, err
+		}
+		break
+	default:
+		return nil, errors.New("role error")
 	}
+
 	return &pb.ResponseJoinResult{
 		Status: 200,
 		Msg:    "successful",
@@ -317,3 +312,15 @@ func (n *node) RequestJoin(ctx context.Context, req *pb.RequestJoinCluster) (*pb
 	}, nil
 
 }
+
+func (n *node) BanNode(clusterId uint64, node uint64) error {
+	_, err := n.nh.RequestDeleteNode(clusterId, node, 0, 5*time.Second)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+//func (n *node)d(){
+//	n.nh.RemoveData()
+//}

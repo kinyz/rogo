@@ -19,7 +19,7 @@ func main() {
 		panic(err)
 	}
 
-	cluster, err := n.RequestJoinCluster("127.0.0.1:22222", 102, "123")
+	cluster, err := n.RequestJoinCluster("127.0.0.1:22222", 102, "123", rogo.JoinRoleFollower)
 	if err != nil {
 		panic(err)
 	}

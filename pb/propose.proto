@@ -18,8 +18,7 @@ enum ProposeType{
    SyncMessage = 0; //发送消息
    SyncData =1;//同步数据
    SyncRemoveData=2;//删除数据
-  //SyncLock=3;//同步锁
- //  SyncState=4;//同步状态
+
 
 }
 

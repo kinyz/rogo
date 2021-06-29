@@ -13,8 +13,18 @@ message RequestJoinCluster{
   uint64 NodeId =2;
   string RaftAddresses=3;
   string Key=4;
+  JoinRole JoinRole=5;
 }
-
+enum JoinRole{
+  Follower =0;
+  Witness=1;
+  Observer=2;
+}
+enum StorageType{
+  Disk =0;
+  Memory=1;
+ // Channel=2;
+}
 message ResponseJoinResult{
   int64 Status=1;
   string Msg=2;

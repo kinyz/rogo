@@ -4,27 +4,26 @@ import (
 	"errors"
 	sm "github.com/lni/dragonboat/v3/statemachine"
 	"io"
-	"log"
 	"rogo/objPool"
 	"rogo/pb"
 	"rogo/prehandle"
 )
 
-type StateMachine struct {
+type MessageMachine struct {
 	ClusterID uint64
 	NodeID    uint64
 	//Count     uint64
 	handle prehandle.Handle
 }
 
-// NewStateMachine creates and return a new ExampleStateMachine object.
-func NewStateMachine(handle prehandle.Handle) *StateMachine {
-	return &StateMachine{
+// NewMessageMachine creates and return a new ExampleStateMachine object.
+func NewMessageMachine(handle prehandle.Handle) *MessageMachine {
+	return &MessageMachine{
 		handle: handle,
 	}
 }
 
-func (s *StateMachine) PreHandle(clusterID uint64,
+func (s *MessageMachine) PreHandle(clusterID uint64,
 	nodeID uint64) sm.IStateMachine {
 	s.ClusterID = clusterID
 	s.NodeID = nodeID
@@ -34,23 +33,24 @@ func (s *StateMachine) PreHandle(clusterID uint64,
 // Lookup performs local lookup on the ExampleStateMachine instance. In this example,
 // we always return the Count value as a little endian binary encoded byte
 // slice.
-func (s *StateMachine) Lookup(query interface{}) (interface{}, error) {
+func (s *MessageMachine) Lookup(query interface{}) (interface{}, error) {
 	//result := make([]byte, 8)
 	//binary.LittleEndian.PutUint64(result, s.Count)
 
-	log.Println("我还是被执行了")
+	//log.Println("我还是被执行了")
 
-	return nil, errors.New("111")
+	return nil, errors.New("no storage")
 }
 
 // Update updates the object using the specified committed raft entry.
-func (s *StateMachine) Update(data []byte) (sm.Result, error) {
+func (s *MessageMachine) Update(data []byte) (sm.Result, error) {
+
 	p := objPool.ProposePool.Get().(*pb.Propose)
 	switch p.GetProposeType() {
 	case pb.ProposeType_SyncMessage:
 		s.handle.SyncMessage(&pb.Message{
 			ClusterId: s.ClusterID,
-			NodeId:    s.NodeID,
+			NodeId:    p.GetNodeId(),
 			ProposeId: p.GetProposeId(),
 			Data:      p.GetData(),
 		})
@@ -62,7 +62,7 @@ func (s *StateMachine) Update(data []byte) (sm.Result, error) {
 
 // SaveSnapshot saves the current IStateMachine state into a snapshot using the
 // specified io.Writer object.
-func (s *StateMachine) SaveSnapshot(w io.Writer,
+func (s *MessageMachine) SaveSnapshot(w io.Writer,
 	fc sm.ISnapshotFileCollection, done <-chan struct{}) error {
 	// as shown above, the only state that can be saved is the Count variable
 	// there is no external file in this IStateMachine example, we thus leave
@@ -74,7 +74,7 @@ func (s *StateMachine) SaveSnapshot(w io.Writer,
 }
 
 // RecoverFromSnapshot recovers the state using the provided snapshot.
-func (s *StateMachine) RecoverFromSnapshot(r io.Reader,
+func (s *MessageMachine) RecoverFromSnapshot(r io.Reader,
 	files []sm.SnapshotFile,
 	done <-chan struct{}) error {
 	// restore the Count variable, that is the only state we maintain in this
@@ -91,4 +91,4 @@ func (s *StateMachine) RecoverFromSnapshot(r io.Reader,
 // Close closes the IStateMachine instance. There is nothing for us to cleanup
 // or release as this is a pure in memory data store. Note that the Close
 // method is not guaranteed to be called as node can crash at any time.
-func (s *StateMachine) Close() error { return nil }
+func (s *MessageMachine) Close() error { return nil }

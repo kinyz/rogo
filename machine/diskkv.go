@@ -283,19 +283,15 @@ type DiskKV struct {
 }
 
 // NewDiskKV creates a new disk kv test state machine.
-func NewDiskKV(handle prehandle.Handle) *DiskKV {
-	d := &DiskKV{
-		handle: handle,
+func NewDiskKV(clusterID uint64,
+	nodeID uint64) sm.IOnDiskStateMachine {
+	return &DiskKV{
+		//handle: handle,
+		clusterID: clusterID,
+		nodeID:    nodeID,
 	}
-	return d
 }
 
-func (d *DiskKV) PreHandle(clusterID uint64,
-	nodeID uint64) sm.IOnDiskStateMachine {
-	d.clusterID = clusterID
-	d.nodeID = nodeID
-	return d
-}
 func (d *DiskKV) queryAppliedIndex(db *pebbledb) (uint64, error) {
 	val, closer, err := db.db.Get([]byte(appliedIndexKey))
 	if err != nil && err != pebble.ErrNotFound {
@@ -398,26 +394,38 @@ func (d *DiskKV) Update(ents []sm.Entry) ([]sm.Entry, error) {
 			log.Println("解析错误:", err)
 			continue
 		}
-
 		switch propose.GetProposeType() {
-		case pb.ProposeType_SyncMessage:
-			d.handle.SyncMessage(&pb.Message{
-				ClusterId: d.clusterID,
-				NodeId:    d.nodeID,
-				ProposeId: propose.GetProposeId(),
-				Data:      propose.GetData(),
-			})
-			continue
+		//case pb.ProposeType_SyncMessage:
+		//	d.handle.SyncMessage(&pb.Message{
+		//		ClusterId: d.clusterID,
+		//		NodeId:    d.nodeID,
+		//		ProposeId: propose.GetProposeId(),
+		//		Data:      propose.GetData(),
+		//	})
+		//	continue
 		case pb.ProposeType_SyncData:
 			w = true
-			dataKv := &pb.KvData{}
+			dataKv := objPool.KvPool.Get().(*pb.KvData)
+
 			err := proto.Unmarshal(propose.GetData(), dataKv)
 			if err != nil {
 				log.Println("dataKv 解析错误:", err)
+				objPool.KvPool.Put(dataKv)
 				continue
 			}
 			wb.Set([]byte(dataKv.GetKey()), dataKv.GetValue(), db.wo)
 			ents[idx].Result = sm.Result{Value: uint64(len(ents[idx].Cmd))}
+			objPool.KvPool.Put(dataKv)
+		case pb.ProposeType_SyncRemoveData:
+			dataKv := objPool.KvPool.Get().(*pb.KvData)
+			err := proto.Unmarshal(propose.GetData(), dataKv)
+			if err != nil {
+				log.Println("dataKv 解析错误:", err)
+				objPool.KvPool.Put(dataKv)
+				continue
+			}
+			wb.Delete([]byte(dataKv.GetKey()), db.wo)
+			objPool.KvPool.Put(dataKv)
 
 		}
 

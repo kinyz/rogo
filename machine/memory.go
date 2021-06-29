@@ -8,26 +8,19 @@ import (
 	"log"
 	"rogo/objPool"
 	"rogo/pb"
-	"rogo/prehandle"
 	"sync"
 )
 
-func NewMemoryMachine(handle prehandle.Handle) Machine {
-	return &memoryMachine{handle: handle}
+func NewMemoryMachine(clusterID uint64,
+	nodeID uint64) sm.IStateMachine {
+	return &memoryMachine{ClusterID: clusterID, NodeID: nodeID}
 }
 
 type memoryMachine struct {
-	handle    prehandle.Handle
+	//handle    prehandle.Handle
 	ClusterID uint64
 	NodeID    uint64
 	kv        sync.Map
-}
-
-func (m *memoryMachine) PreStateHandle(clusterID uint64,
-	nodeID uint64) sm.IStateMachine {
-	m.ClusterID = clusterID
-	m.NodeID = nodeID
-	return m
 }
 
 func (m *memoryMachine) Update(data []byte) (sm.Result, error) {
@@ -39,14 +32,14 @@ func (m *memoryMachine) Update(data []byte) (sm.Result, error) {
 		return sm.Result{}, err
 	}
 	switch p.GetProposeType() {
-	case pb.ProposeType_SyncMessage:
-		msg := objPool.MessagePool.Get().(*pb.Message)
-		msg.ClusterId = m.ClusterID
-		msg.NodeId = m.NodeID
-		msg.ProposeId = p.GetProposeId()
-		msg.Data = p.GetData()
-		m.handle.SyncMessage(msg)
-		break
+	//case pb.ProposeType_SyncMessage:
+	//	msg := objPool.MessagePool.Get().(*pb.Message)
+	//	msg.ClusterId = m.ClusterID
+	//	msg.NodeId = m.NodeID
+	//	msg.ProposeId = p.GetProposeId()
+	//	msg.Data = p.GetData()
+	//	m.handle.SyncMessage(msg)
+	//	break
 	case pb.ProposeType_SyncData:
 		kv := objPool.KvPool.Get().(*pb.KvData)
 		err := proto.Unmarshal(p.GetData(), kv)

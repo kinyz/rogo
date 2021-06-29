@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"github.com/golang/protobuf/proto"
 	"log"
 	"os"
 	"rogo"
@@ -21,7 +22,7 @@ func main() {
 		panic(err)
 	}
 
-	cluster, err := n.RequestJoinCluster("127.0.0.1:22222", 102, "123")
+	cluster, err := n.RequestJoinCluster("127.0.0.1:22222", 102, "123", rogo.JoinRoleWitness)
 	if err != nil {
 		panic(err)
 	}
@@ -71,38 +72,63 @@ func (f *stateFollow) listen() {
 				continue
 			}
 
-			data, err := f.node.GetSyncData(102, parts[1])
-			if err != nil {
-				log.Println(err)
-				continue
-			}
-			log.Println(string(data))
+			//
+			//data, err := f.node.GetSyncData(102, parts[1])
+			//if err != nil {
+			//	log.Println(err)
+			//	continue
+			//}
+			//log.Println(string(data))
 			hs := f.node.GetNodeHost()
-
-			index, err := hs.ReadIndex(102, 5*time.Second)
+			ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+			cli, err := hs.SyncGetSession(ctx2, 102)
+			//hs.StartConcurrentCluster()
 			if err != nil {
 				log.Println(err)
+				cancel2()
 				continue
 			}
-			log.Println("开始")
-			//hs.RequestAddObserver()
-			<-index.AppliedC()
-			log.Println("完成")
+			cancel2()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			session, err := hs.SyncGetSession(ctx, 102)
+			d, err := proto.Marshal(&pb.Propose{
+				ProposeType: pb.ProposeType_SyncMessage,
+				NodeId:      "33",
+				Data:        []byte("1222"),
+				ProposeId:   122,
+				TimesTamp:   0,
+			})
 			if err != nil {
 				log.Println(err)
-				continue
 			}
-			log.Println(session.GetClientID())
+			_, err = hs.SyncPropose(ctx, cli, d)
+			if err != nil {
+				log.Println(err)
+			}
 			cancel()
-
-			node, err := hs.ReadLocalNode(index, []byte(parts[1]))
-			if err != nil {
-				log.Println(err)
-				continue
-			}
-			log.Println(string(node.([]byte)))
+			//index, err := hs.ReadIndex(102, 5*time.Second)
+			//if err != nil {
+			//	log.Println(err)
+			//	continue
+			//}
+			//log.Println("开始")
+			////hs.RequestAddObserver()
+			//<-index.AppliedC()
+			//log.Println("完成")
+			//ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			//session, err := hs.SyncGetSession(ctx, 102)
+			//if err != nil {
+			//	log.Println(err)
+			//	continue
+			//}
+			//log.Println(session.GetClientID())
+			//cancel()
+			//
+			//node, err := hs.ReadLocalNode(index, []byte(parts[1]))
+			//if err != nil {
+			//	log.Println(err)
+			//	continue
+			//}
+			//log.Println(string(node.([]byte)))
 
 		case "msg":
 			if len(parts) != 2 {
@@ -110,7 +136,10 @@ func (f *stateFollow) listen() {
 
 				continue
 			}
-			f.node.SendMsg(102, 222, []byte(parts[1]))
+			err := f.node.SendMsg(102, 222, []byte(parts[1]))
+			if err != nil {
+				log.Println(err)
+			}
 
 		}
 
