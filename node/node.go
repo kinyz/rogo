@@ -31,10 +31,14 @@ type Node interface {
 	// SendMessage 发送消息 仅消息集群可用
 	SendMessage(clusterId uint64, msgId int64, data []byte) error
 
+	// SyncData 同步数据
 	SyncData(clusterId uint64, key string, value []byte) error
+	// GetData 获取数据
 	GetData(clusterId uint64, key string) ([]byte, error)
+	// RemoveData 删除数据
 	RemoveData(clusterId uint64, key string) error
 
+	// StopCluster 停止集群
 	StopCluster(clusterId uint64) error
 
 	AddNode(clusterId uint64, nodeId uint64, addr string) error
@@ -44,10 +48,13 @@ type Node interface {
 	// BanNode 删除Node 此Node进入黑名单
 	BanNode(clusterId uint64, node uint64) error
 
+	// RequestJoinCluster 请求加入集群
 	RequestJoinCluster(grpcAddr string, clusterId uint64, key string, role pb.Role) (*pb.ResponseJoinResult, error)
 
+	// StartOauthService 开启验证服务
 	StartOauthService(addr string, srv prehandle.RequestHandle) error
 
+	// GetRaftId 获取Raft集群的id
 	GetRaftId() string
 }
 
@@ -277,18 +284,11 @@ func (n *node) StartOauthService(addr string, srv prehandle.RequestHandle) error
 	if err != nil {
 		return err
 	}
+	n.reqDandle = srv
 	s := grpc.NewServer()
 	pb.RegisterRequestServer(s, n)
-	go func() {
-		err = s.Serve(ln)
-		if err != nil {
-			fmt.Println("用户端口出错", err)
-		}
-	}()
 	log.Println("oauth service start: ", addr)
-
-	n.reqDandle = srv
-	return nil
+	return s.Serve(ln)
 }
 
 func (n *node) RequestJoinCluster(grpcAddr string, clusterId uint64, key string, role pb.Role) (*pb.ResponseJoinResult, error) {

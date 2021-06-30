@@ -6,12 +6,18 @@ import (
 )
 
 const (
-	RoleCreator  = pb.Role_Creator
+	// RoleCreator 集群创建者
+	RoleCreator = pb.Role_Creator
+	// RoleFollower 集群跟随者
 	RoleFollower = pb.Role_Follower
-	RoleWitness  = pb.Role_Witness
+	// RoleWitness 集群见证者
+	RoleWitness = pb.Role_Witness
+	// RoleObserver 集群观察者
 	RoleObserver = pb.Role_Observer
 
-	StorageTypeDisk   = pb.StorageType_Disk
+	// StorageTypeDisk 硬盘存储
+	StorageTypeDisk = pb.StorageType_Disk
+	// StorageTypeMemory 内存存储
 	StorageTypeMemory = pb.StorageType_Memory
 )
 

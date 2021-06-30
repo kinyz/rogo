@@ -48,12 +48,12 @@ func (s *MessageMachine) Update(data []byte) (sm.Result, error) {
 	p := objPool.ProposePool.Get().(*pb.Propose)
 	switch p.GetProposeType() {
 	case pb.ProposeType_SyncMessage:
-		s.handle.SyncMessage(&pb.Message{
-			ClusterId: s.ClusterID,
-			NodeId:    p.GetNodeId(),
-			ProposeId: p.GetProposeId(),
-			Data:      p.GetData(),
-		})
+		msg := objPool.MessagePool.Get().(*pb.Message)
+		msg.ClusterId = s.ClusterID
+		msg.NodeId = p.GetNodeId()
+		msg.Data = p.GetData()
+		msg.ProposeId = p.GetProposeId()
+		s.handle.SyncMessage(msg)
 		break
 	}
 
