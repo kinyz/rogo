@@ -9,5 +9,5 @@ type Handle interface {
 }
 
 type RequestHandle interface {
-	Oauth(req *pb.RequestJoinCluster) error
+	Oauth(req *pb.RequestJoinCluster) (*pb.ResponseJoinResult, error)
 }

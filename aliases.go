@@ -6,9 +6,10 @@ import (
 )
 
 const (
-	JoinRoleFollower = pb.JoinRole_Follower
-	JoinRoleWitness  = pb.JoinRole_Witness
-	JoinRoleObserver = pb.JoinRole_Observer
+	RoleCreator  = pb.Role_Creator
+	RoleFollower = pb.Role_Follower
+	RoleWitness  = pb.Role_Witness
+	RoleObserver = pb.Role_Observer
 
 	StorageTypeDisk   = pb.StorageType_Disk
 	StorageTypeMemory = pb.StorageType_Memory

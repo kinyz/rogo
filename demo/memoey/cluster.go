@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"rogo"
+	"rogo/pb"
 	"strings"
 	"sync/atomic"
 )
@@ -14,7 +15,7 @@ func main() {
 	n := rogo.NewNode("127.0.0.1", "13202", 1)
 	ma := &mainCluster{nodeId: 2, key: "123", node: n}
 
-	err := n.CreatStorageCluster(102, rogo.StorageTypeDisk, false)
+	err := n.StartStorageCluster(102, rogo.StorageTypeMemory, rogo.RoleCreator)
 	if err != nil {
 		panic(err)
 	}
@@ -34,13 +35,17 @@ type mainCluster struct {
 	node rogo.Node
 }
 
-func (m *mainCluster) Oauth(req rogo.RequestJoinCluster) error {
+func (m *mainCluster) Oauth(req rogo.RequestJoinCluster) (*pb.ResponseJoinResult, error) {
 	if req.GetKey() != m.key {
-		return errors.New("key错误")
+		return nil, errors.New("key错误")
 	}
 	atomic.AddUint64(&m.nodeId, +1)
 	log.Println("请求连接:", req.NodeId)
-	return nil
+	return &pb.ResponseJoinResult{
+		ClusterId: req.GetClusterId(),
+		Status:    200,
+		Msg:       "连接成功",
+	}, nil
 
 }
 
@@ -79,7 +84,7 @@ func (m *mainCluster) listen() {
 
 				continue
 			}
-			data, err := m.node.GetSyncData(102, parts[1])
+			data, err := m.node.GetData(102, parts[1])
 			if err != nil {
 				log.Println(err)
 				continue

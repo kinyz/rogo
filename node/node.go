@@ -22,16 +22,16 @@ import (
 
 type Node interface {
 
-	// CreatStorageCluster 创建存储集群
-	CreatStorageCluster(clusterId uint64, machineType pb.StorageType, join bool) error
+	// StartStorageCluster 创建存储集群
+	StartStorageCluster(clusterId uint64, machineType pb.StorageType, role pb.Role) error
 
-	// CreatMessageCluster 创建消息集群
-	CreatMessageCluster(clusterId uint64, join bool, handle prehandle.Handle) error
+	// StartMessageCluster 创建消息集群
+	StartMessageCluster(clusterId uint64, role pb.Role, handle prehandle.Handle) error
 
 	// SendMessage 发送消息 仅消息集群可用
 	SendMessage(clusterId uint64, msgId int64, data []byte) error
 
-	SetData(clusterId uint64, key string, value []byte) error
+	SyncData(clusterId uint64, key string, value []byte) error
 	GetData(clusterId uint64, key string) ([]byte, error)
 	RemoveData(clusterId uint64, key string) error
 
@@ -44,7 +44,7 @@ type Node interface {
 	// BanNode 删除Node 此Node进入黑名单
 	BanNode(clusterId uint64, node uint64) error
 
-	RequestJoinCluster(grpcAddr string, clusterId uint64, key string, role pb.JoinRole) (*pb.ResponseJoinResult, error)
+	RequestJoinCluster(grpcAddr string, clusterId uint64, key string, role pb.Role) (*pb.ResponseJoinResult, error)
 
 	StartOauthService(addr string, srv prehandle.RequestHandle) error
 
@@ -83,11 +83,10 @@ type node struct {
 	reqDandle prehandle.RequestHandle
 }
 
-func (n *node) CreatStorageCluster(clusterId uint64, machineType pb.StorageType, join bool) error {
+func (n *node) StartStorageCluster(clusterId uint64, machineType pb.StorageType, role pb.Role) error {
+
+	join := false
 	initialMembers := make(map[uint64]string)
-	if !join {
-		initialMembers[1] = n.nh.RaftAddress()
-	}
 	rc := config.Config{
 		NodeID:             n.nodeId,
 		ClusterID:          clusterId,
@@ -97,21 +96,37 @@ func (n *node) CreatStorageCluster(clusterId uint64, machineType pb.StorageType,
 		SnapshotEntries:    10,
 		CompactionOverhead: 5,
 	}
+	switch role {
+	case pb.Role_Creator:
+		initialMembers[1] = n.nh.RaftAddress()
+		break
+	case pb.Role_Follower:
+		join = true
+		break
+	case pb.Role_Witness:
+		rc.SnapshotEntries = 0
+		rc.IsWitness = true
+		join = true
+	case pb.Role_Observer:
+		rc.IsObserver = true
+		join = true
+	default:
+		return errors.New("role is error")
+	}
+
 	switch machineType {
 	case pb.StorageType_Disk:
 		return n.nh.StartOnDiskCluster(initialMembers, join, machine.NewDiskKV, rc)
 	case pb.StorageType_Memory:
 		return n.nh.StartCluster(initialMembers, join, machine.NewMemoryMachine, rc)
 	}
-	return errors.New("storage type type is error")
+	return errors.New("storage type is error")
 
 }
 
-func (n *node) CreatMessageCluster(clusterId uint64, join bool, handle prehandle.Handle) error {
+func (n *node) StartMessageCluster(clusterId uint64, role pb.Role, handle prehandle.Handle) error {
 	initialMembers := make(map[uint64]string)
-	if !join {
-		initialMembers[1] = n.nh.RaftAddress()
-	}
+
 	rc := config.Config{
 		NodeID:             n.nodeId,
 		ClusterID:          clusterId,
@@ -120,6 +135,24 @@ func (n *node) CreatMessageCluster(clusterId uint64, join bool, handle prehandle
 		CheckQuorum:        true,
 		SnapshotEntries:    10,
 		CompactionOverhead: 5,
+	}
+	join := false
+	switch role {
+	case pb.Role_Creator:
+		initialMembers[1] = n.nh.RaftAddress()
+		break
+	case pb.Role_Follower:
+		join = true
+		break
+	case pb.Role_Witness:
+		rc.SnapshotEntries = 0
+		rc.IsWitness = true
+		join = true
+	case pb.Role_Observer:
+		rc.IsObserver = true
+		join = true
+	default:
+		return errors.New("role is error")
 	}
 	m := machine.NewMessageMachine(handle)
 	return n.nh.StartCluster(initialMembers, join, m.PreHandle, rc)
@@ -158,7 +191,7 @@ func (n *node) SendMessage(clusterId uint64, msgId int64, data []byte) error {
 	return n.proposeData(clusterId, pb.ProposeType_SyncMessage, msgId, data)
 }
 
-func (n *node) SetData(clusterId uint64, key string, value []byte) error {
+func (n *node) SyncData(clusterId uint64, key string, value []byte) error {
 	kvData := objPool.KvPool.Get().(*pb.KvData)
 	defer objPool.KvPool.Put(kvData)
 	kvData.Key = key
@@ -258,7 +291,7 @@ func (n *node) StartOauthService(addr string, srv prehandle.RequestHandle) error
 	return nil
 }
 
-func (n *node) RequestJoinCluster(grpcAddr string, clusterId uint64, key string, role pb.JoinRole) (*pb.ResponseJoinResult, error) {
+func (n *node) RequestJoinCluster(grpcAddr string, clusterId uint64, key string, role pb.Role) (*pb.ResponseJoinResult, error) {
 	conn, err := grpc.Dial(grpcAddr, grpc.WithInsecure())
 	if err != nil {
 		return nil, err
@@ -270,33 +303,31 @@ func (n *node) RequestJoinCluster(grpcAddr string, clusterId uint64, key string,
 		NodeId:        n.nodeId,
 		JoinRole:      role,
 	})
-
 }
 
 func (n *node) RequestJoin(ctx context.Context, req *pb.RequestJoinCluster) (*pb.ResponseJoinResult, error) {
 	n.oauthLock.Lock()
 	defer n.oauthLock.Unlock()
-	err := n.reqDandle.Oauth(req)
+	resp, err := n.reqDandle.Oauth(req)
 	if err != nil {
 		return nil, err
 	}
 
 	switch req.GetJoinRole() {
-	case pb.JoinRole_Follower:
-		err = n.AddNode(req.GetClusterId(), req.GetNodeId(), req.GetRaftAddresses())
+	case pb.Role_Follower:
+		err = n.AddNode(resp.GetClusterId(), req.GetNodeId(), req.GetRaftAddresses())
 		if err != nil {
 			return nil, err
 		}
 		break
-	case pb.JoinRole_Witness:
-		//log.Println("见证者加入")
-		err = n.AddWitnessNode(req.GetClusterId(), req.GetNodeId(), req.GetRaftAddresses())
+	case pb.Role_Witness:
+		err = n.AddWitnessNode(resp.GetClusterId(), req.GetNodeId(), req.GetRaftAddresses())
 		if err != nil {
 			return nil, err
 		}
 		break
-	case pb.JoinRole_Observer:
-		err = n.AddObserverNode(req.GetClusterId(), req.GetNodeId(), req.GetRaftAddresses())
+	case pb.Role_Observer:
+		err = n.AddObserverNode(resp.GetClusterId(), req.GetNodeId(), req.GetRaftAddresses())
 		if err != nil {
 			return nil, err
 		}
@@ -305,11 +336,7 @@ func (n *node) RequestJoin(ctx context.Context, req *pb.RequestJoinCluster) (*pb
 		return nil, errors.New("role error")
 	}
 
-	return &pb.ResponseJoinResult{
-		Status: 200,
-		Msg:    "successful",
-		//	NodeId: nodeId,
-	}, nil
+	return resp, nil
 
 }
 
@@ -320,7 +347,3 @@ func (n *node) BanNode(clusterId uint64, node uint64) error {
 	}
 	return nil
 }
-
-//func (n *node)d(){
-//	n.nh.RemoveData()
-//}

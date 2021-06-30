@@ -14,16 +14,16 @@ func main() {
 	n := rogo.NewNode("127.0.0.1", "13204", 3)
 	f := &follower{node: n}
 
-	err := n.JoinMemoryCluster(102, f)
+	err := n.StartStorageCluster(102, rogo.StorageTypeMemory, rogo.RoleFollower)
 	if err != nil {
 		panic(err)
 	}
 
-	cluster, err := n.RequestJoinCluster("127.0.0.1:22222", 102, "123", rogo.JoinRoleFollower)
-	if err != nil {
-		panic(err)
-	}
-	log.Println(cluster)
+	//cluster, err := n.RequestJoinCluster("127.0.0.1:22222", 102, "123", rogo.RoleFollower)
+	//if err != nil {
+	//	panic(err)
+	//}
+	//log.Println(cluster)
 	f.listen()
 }
 
@@ -66,7 +66,7 @@ func (f *follower) listen() {
 
 				continue
 			}
-			data, err := f.node.GetSyncData(102, parts[1])
+			data, err := f.node.GetData(102, parts[1])
 			if err != nil {
 				log.Println(err)
 				continue
@@ -78,7 +78,21 @@ func (f *follower) listen() {
 
 				continue
 			}
-			f.node.SendMsg(102, 222, []byte(parts[1]))
+			f.node.SendMessage(102, 222, []byte(parts[1]))
+		case "del":
+			if len(parts) != 2 {
+				log.Println("不等于2")
+
+				continue
+			}
+			err := f.node.RemoveData(102, parts[1])
+			if err != nil {
+				log.Println(err)
+
+				continue
+
+			}
+			log.Println("del ok")
 
 		}
 

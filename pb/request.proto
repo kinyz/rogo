@@ -13,12 +13,13 @@ message RequestJoinCluster{
   uint64 NodeId =2;
   string RaftAddresses=3;
   string Key=4;
-  JoinRole JoinRole=5;
+  Role JoinRole=5;
 }
-enum JoinRole{
-  Follower =0;
-  Witness=1;
-  Observer=2;
+enum Role{
+  Creator=0;
+  Follower =1;
+  Witness=2;
+  Observer=3;
 }
 enum StorageType{
   Disk =0;
@@ -26,8 +27,9 @@ enum StorageType{
  // Channel=2;
 }
 message ResponseJoinResult{
-  int64 Status=1;
-  string Msg=2;
+  uint64 ClusterId =1;
+  int64 Status=2;
+  string Msg=3;
   //uint64 NodeId=3;
 
 }
